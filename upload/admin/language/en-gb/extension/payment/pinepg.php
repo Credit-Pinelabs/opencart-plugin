@@ -27,6 +27,7 @@ $_['entry_status']         = 'Status';
 $_['entry_status_enabled']         = 'Enabled';
 $_['entry_status_disabled']         = 'Disabled';
 $_['entry_order_status']         = 'Order Status';
+$_['entry_enable_down_payment'] = 'Enable Down Payment';
 
 $_['help_merchantid']		     = 'Enter the merchant id provided by Pine Labs ';
 $_['help_access_code']		     = 'Enter the access code provided by Pine Labs ';

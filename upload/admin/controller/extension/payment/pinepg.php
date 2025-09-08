@@ -70,6 +70,8 @@ class ControllerExtensionPaymentPinePG extends Controller {
 		$this->document->setTitle($this->language->get('heading_title'));
 		
 		$this->load->model('setting/setting');
+
+		
 		
 			
 		if (($this->request->server['REQUEST_METHOD'] == 'POST') && $this->validate()) {
@@ -81,6 +83,7 @@ class ControllerExtensionPaymentPinePG extends Controller {
 		}
 
 		$data['heading_title'] = $this->language->get('heading_title');
+		$data['entry_enable_down_payment'] = 'Enable Down Payment';
 
 		$data['text_enabled'] = $this->language->get('text_enabled');
 		$data['text_disabled'] = $this->language->get('text_disabled');
@@ -244,6 +247,12 @@ class ControllerExtensionPaymentPinePG extends Controller {
 		} else {
 			$data['payment_pinepg_sort_order'] = $this->config->get('payment_pinepg_sort_order');
 		}
+
+		if (isset($this->request->post['payment_pinepg_enable_down_payment'])) {
+		$data['payment_pinepg_enable_down_payment'] = $this->request->post['payment_pinepg_enable_down_payment'];
+	} else {
+		$data['payment_pinepg_enable_down_payment'] = $this->config->get('payment_pinepg_enable_down_payment');
+	}
 
 		
 

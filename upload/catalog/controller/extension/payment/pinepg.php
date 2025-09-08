@@ -98,146 +98,179 @@ if ($coupon_discount > 0) {
 
 
 
-  private function initiatePayment($order_info) {
+  private function is_part_payment_enabled() {
+    return $this->config->get('payment_pinepg_enable_down_payment') == '1';
+}
 
-	$this->logger->write('Inside Initiate Payment method');
-	
-		$callback_url = $this->getCallbackUrl();
-	
-			$PinePgMode=$this->config->get('payment_pinepg_mode');
-			if($PinePgMode == "live")
-			{
-				$url ='https://api.pluralpay.in/api/checkout/v1/orders';
-			}else{
-				$url ='https://pluraluat.v2.pinepg.in/api/checkout/v1/orders';
-			}
-	
-		$access_token = $this->getAccessToken();
-		if (!$access_token) {
-			return ['response_code' => 500, 'message' => 'Access token retrieval failed'];
-		}
-	
-		$orderamount= $order_info['total'] * 100;
-	
-		if (is_numeric($orderamount) && floor($orderamount) != $orderamount) {
-			$orderamount = ceil($orderamount);
-		}
-	
-	
-		
-	
-		// Get ordered products and replicate as per quantity
-		$products = [];
-		$productPriceTotal=0;
-		foreach ($order_info['products'] as $product) {
-			
-			$productPrice=intval($product['price'] * 100);
-			$quantity=$product['quantity'];
-			
-	
-			for ($j = 0; $j < $quantity; $j++) {
-				if(!empty($product['sku'])){
-				$productData = [
-					'product_code' => $product['sku'],
-					'product_amount' => [
-						'value' => $productPrice,
-						'currency' => 'INR',
-					],
-				];
-			
-				$productPriceTotal=$productPriceTotal+$productPrice;
-				$products[] = $productData;
-			}
-			
-			}
-		}
-	
-		if($orderamount>$productPriceTotal){
-	
-			$additional_charge=$orderamount-$productPriceTotal;
-	
-			$productData = [
-				'product_code' => 'additional_charge',
-				'product_amount' => [
-					'value' => $additional_charge,
-					'currency' => 'INR',
-				],
-			];
-			$products[] = $productData;
-		}
-	
-		if($productPriceTotal>$orderamount){
-	
-			$orderamount=$productPriceTotal;
-		}
-	
-		$billing_address=$this->truncateAddress($order_info['payment_address_1']);
-		$shipping_address=$this->truncateAddress($order_info['shipping_address_1']);
-	
-		$body = [
-			'merchant_order_reference' => $order_info['order_id'] . '_' . date('ymdHis'),
-			'order_amount' => [
-				'value' => $orderamount,
-				'currency' => 'INR',
-			],
-			'callback_url' => $callback_url,
-			'pre_auth' => false,
-			  'integration_mode'=> "REDIRECT",
-			  "plugin_data"=> [
-					"plugin_type" => "Opencart",
-					"plugin_version" => "V3"
-			  ],
-			'purchase_details' => [
-				'customer' => [
-					'email_id' => $order_info['email'],
-					'first_name' => $order_info['firstname'],
-					'last_name' => $order_info['lastname'],
-					//'customer_id' => $order_info['customer_id'],
-					'mobile_number' => $order_info['telephone'],
-				],
-				'billing_address' => [
-					'address1' => $billing_address,
-					'pincode' => $order_info['payment_postcode'],
-					'city' => $order_info['payment_city'],
-					'state' => $order_info['payment_zone'],
-					'country' => $order_info['payment_iso_code_2'],
-				],
-				'shipping_address' => [
-					'address1' => $shipping_address,
-					'pincode' => $order_info['shipping_postcode'],
-					'city' => $order_info['shipping_city'],
-					'state' => $order_info['shipping_zone'],
-					'country' => $order_info['shipping_iso_code_2'],
-				],
-				'products' => $products
-			],
-		];
-	
-	
-		// Add coupon discount only if it exists and is greater than zero
-	if (!empty($order_info['cart_coupon_discount_amount']) && $order_info['cart_coupon_discount_amount'] > 0) {
-		$body['cart_coupon_discount_amount'] = [
-			'value' => $order_info['cart_coupon_discount_amount']*100,
-			'currency' => 'INR',
-		];
-	}
-	
-	$body=json_encode($body);
-	
-		$merchant_id=$this->config->get('payment_pinepg_merchantid');
-	
-	
-		$this->logger->write('V3 request log'.$body);
-	
-		$headers = [
-			'Merchant-ID: ' . $merchant_id,
-			'Authorization: Bearer ' . $access_token,
-			'Content-Type: application/json',
-		];
-	
-		$response = $this->sendPostRequest($url, $body, $headers);
-		return json_decode($response, true);
-	}
+  private function initiatePayment($order_info) {
+    $this->logger->write('Inside Initiate Payment method');
+
+    $callback_url = $this->getCallbackUrl();
+    $PinePgMode = $this->config->get('payment_pinepg_mode');
+    $url = ($PinePgMode === "live")
+        ? 'https://api.pluralpay.in/api/checkout/v1/orders'
+        : 'https://pluraluat.v2.pinepg.in/api/checkout/v1/orders';
+
+    $access_token = $this->getAccessToken();
+    if (!$access_token) {
+        return ['response_code' => 500, 'message' => 'Access token retrieval failed'];
+    }
+
+    // Prepare customer mobile
+    $telephone = preg_replace('/\D/', '', $order_info['telephone']) ?: '9999999999';
+
+    // Truncate addresses
+    $billing_address = $this->truncateAddress($order_info['payment_address_1']);
+    $shipping_address = $this->truncateAddress($order_info['shipping_address_1']);
+
+    // Amounts in paise
+    $grandTotal = intval(round(floatval($order_info['total']) * 100));
+    $shippingAmount = isset($order_info['shipping_cost']) ? intval(round(floatval($order_info['shipping_cost']) * 100)) : 0;
+    $couponDiscount = isset($order_info['cart_coupon_discount_amount']) ? abs(floatval($order_info['cart_coupon_discount_amount'])) : 0;
+
+    $products = [];
+    $totalProductValue = 0;
+
+    // Calculate total item price incl. tax for proportional discount
+    $totalItemTaxIncl = 0.0;
+    foreach ($order_info['products'] as $product) {
+        $priceInclTax = floatval($product['price'] + (isset($product['tax']) ? $product['tax'] : 0));
+        $totalItemTaxIncl += $priceInclTax * $product['quantity'];
+    }
+
+    // Process products with proportional discount
+    foreach ($order_info['products'] as $product) {
+        $qty = intval($product['quantity']);
+        if ($qty <= 0) continue;
+
+        $priceInclTax = floatval($product['price'] + (isset($product['tax']) ? $product['tax'] : 0));
+        $itemDiscount = isset($product['discount']) ? abs(floatval($product['discount'])) : 0;
+        $sku = !empty($product['sku']) ? $product['sku'] : 'ITEM_' . $product['product_id'] . '_' . rand(10000, 99999);
+
+        $itemTotal = $priceInclTax * $qty;
+
+        $cartDiscountShare = $totalItemTaxIncl > 0
+            ? ($itemTotal / $totalItemTaxIncl) * $couponDiscount
+            : 0;
+
+        $totalDiscount = $itemDiscount + $cartDiscountShare;
+        $finalItemPrice = ($itemTotal - $totalDiscount) / $qty;
+        $finalItemPrice = max(0, $finalItemPrice);
+
+        $finalItemPricePaise = intval(round($finalItemPrice * 100));
+
+        if ($finalItemPricePaise <= 0) {
+            $this->logger->write("Skipping product with 0 price after discount: {$product['name']} (SKU: $sku)");
+            continue;
+        }
+
+        $this->logger->write("Item: {$product['name']}, SKU: $sku, Qty: $qty, PriceInclTax: $priceInclTax, ItemDiscount: $itemDiscount, CartDiscountShare: $cartDiscountShare, FinalPrice: $finalItemPricePaise");
+
+        for ($i = 0; $i < $qty; $i++) {
+            $products[] = [
+                'product_code' => $sku,
+                'product_amount' => [
+                    'value' => $finalItemPricePaise,
+                    'currency' => 'INR',
+                ],
+            ];
+            $totalProductValue += $finalItemPricePaise;
+        }
+    }
+
+    // Add shipping as a product
+    if ($shippingAmount > 0) {
+        $products[] = [
+            'product_code' => 'shipping_charge',
+            'product_amount' => [
+                'value' => $shippingAmount,
+                'currency' => 'INR',
+            ],
+        ];
+        $this->logger->write("Shipping added: ₹" . ($shippingAmount / 100));
+        $totalProductValue += $shippingAmount;
+    }
+
+    // Rounding adjustment
+    $roundingAdjustment = $grandTotal - $totalProductValue;
+    if ($roundingAdjustment != 0) {
+        $products[] = [
+            'product_code' => 'rounding_adjustment',
+            'product_amount' => [
+                'value' => $roundingAdjustment,
+                'currency' => 'INR',
+            ],
+        ];
+        $this->logger->write("Adding rounding adjustment: ₹" . ($roundingAdjustment / 100));
+        $totalProductValue += $roundingAdjustment;
+    }
+
+    // Validation
+    if (abs($grandTotal - $totalProductValue) > 1) {
+        $this->logger->write("Amount mismatch! GrandTotal: $grandTotal, Calculated: $totalProductValue");
+        throw new \Exception("Amount calculation error - totals don't match");
+    }
+
+    $partPaymentEnabled = $this->is_part_payment_enabled();
+
+    $payload = [
+        'merchant_order_reference' => $order_info['order_id'] . '_' . date('ymdHis'),
+        'order_amount' => [
+            'value' => $grandTotal,
+            'currency' => 'INR',
+        ],
+        'callback_url' => $callback_url,
+        'pre_auth' => false,
+        'integration_mode' => "REDIRECT",
+        "plugin_data" => [
+            "plugin_type" => "Opencart",
+            "plugin_version" => "V3"
+        ],
+        'purchase_details' => [
+            'customer' => [
+                'email_id' => $order_info['email'],
+                'first_name' => $order_info['firstname'],
+                'last_name' => $order_info['lastname'],
+                'mobile_number' => $telephone,
+            ],
+            'billing_address' => [
+                'address1' => $billing_address,
+                'pincode' => $order_info['payment_postcode'],
+                'city' => $order_info['payment_city'],
+                'state' => $order_info['payment_zone'],
+                'country' => $order_info['payment_iso_code_2'],
+            ],
+            'shipping_address' => [
+                'address1' => $shipping_address,
+                'pincode' => $order_info['shipping_postcode'],
+                'city' => $order_info['shipping_city'],
+                'state' => $order_info['shipping_zone'],
+                'country' => $order_info['shipping_iso_code_2'],
+            ],
+            'products' => $products,
+        ],
+    ];
+
+    if ($partPaymentEnabled) {
+        $payload['part_payment'] = true;
+    }
+
+    $body = json_encode($payload);
+    $this->logger->write('V3 request log: ' . $body);
+
+    $headers = [
+        'Merchant-ID: ' . $this->config->get('payment_pinepg_merchantid'),
+        'Authorization: Bearer ' . $access_token,
+        'Content-Type: application/json',
+    ];
+
+    $response = $this->sendPostRequest($url, $body, $headers);
+    return json_decode($response, true);
+}
+
+
+
+
 
 
 	
