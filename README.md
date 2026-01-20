@@ -1,17 +1,17 @@
-# 🛒 Plural Payment Gateway Plugin for OpenCart
+# 🛒 Pay Securely with Pine Labs Payment Gateway Plugin for OpenCart
 
 **Platform:** OpenCart  
 **Supported Versions:** 2.X to 3.X  
 
-Integrate your OpenCart store with **Plural by Pine Labs** for seamless payment processing through **credit cards**, **debit cards**, and **EMI options** using the **PinePG Edge platform**.
+Integrate your OpenCart store with **Pay Securely with Pine Labs** for seamless payment processing through **credit cards**, **debit cards**, and **EMI options** using the **Pay Securely with Pine Labs**.
 
 ---
 
 ## 📦 Features
 
-- 🔗 Full integration with **Plural by Pine Labs**
+- 🔗 Full integration with **Pay Securely with Pine Labs**
 - 💳 Supports major payment methods: credit cards, debit cards
-- 🧾 EMI option support via **PinePG Edge**
+- 🧾 EMI option support via **Pay Securely with Pine Labs**
 - 🔒 Secure and stable integration via OpenCart's extension system
 
 ---
@@ -53,9 +53,9 @@ You should receive a file ending with `.ocmod.zip`, typically inside the ZIP arc
 
 ## 🕐 Cron Job Setup
 
-To configure the PinePG Cron Job (used for updating pending transaction statuses), refer to the detailed guide below:
+To configure the Pay Securely with Pine Labs Cron Job (used for updating pending transaction statuses), refer to the detailed guide below:
 
-🔗 [PinePG Cron Job Setup Guide](https://docs.google.com/document/d/1QNCQaDgustBBwLfrxktk0UlwK2RJ2OOA/edit)
+🔗 [Pay Securely with Pine Labs Cron Job Setup Guide](https://docs.google.com/document/d/1QNCQaDgustBBwLfrxktk0UlwK2RJ2OOA/edit)
 
 ---
 
