@@ -213,6 +213,7 @@ if ($coupon_discount > 0) {
 
     $partPaymentEnabled = $this->is_part_payment_enabled();
 
+
     $payload = [
         'merchant_order_reference' => $order_info['order_id'] . '_' . date('ymdHis'),
         'order_amount' => [
@@ -247,6 +248,9 @@ if ($coupon_discount > 0) {
                 'state' => $order_info['shipping_zone'],
                 'country' => $order_info['shipping_iso_code_2'],
             ],
+            'merchant_metadata' => [
+									'express_checkout_allowed_action' => 'checkoutCollectAddress, checkoutCollectMobile'
+							],
             'products' => $products,
         ],
     ];
@@ -616,6 +620,188 @@ private function handleFailedPayment($opencart_order_id, $pinepg_order_id, $stat
     $this->logger->write("Payment failed for order $opencart_order_id. Status: $status");
     $this->response->redirect($this->url->link('checkout/failure'));
 }
+
+public function webhook()
+{
+    $this->load->model('extension/payment/pinepg');
+    $this->load->model('checkout/order');
+
+    $this->logger = new Log('pinepg_' . date("Y-m-d") . '.log');
+
+    // Read raw body
+    $rawBody = file_get_contents('php://input');
+    $headers = $this->getWebhookHeaders();
+
+    $this->logger->write('Webhook RAW HEADERS: ' . json_encode($headers));
+    $this->logger->write('Webhook RAW BODY: ' . $rawBody);
+
+    // 🔐 FIRST verify signature BEFORE processing payload
+    if (!$this->verifyWebhookSignature($headers, $rawBody)) {
+        $this->logger->write('Invalid webhook signature');
+        http_response_code(401);
+        echo json_encode(['error' => 'Invalid signature']);
+        return;
+    }
+
+    $this->logger->write('Signature verified successfully');
+
+    $payload = json_decode($rawBody, true);
+
+    if (
+        empty($payload['event_type']) ||
+        empty($payload['data']['order_id']) ||
+        empty($payload['data']['status'])
+    ) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid payload']);
+        return;
+    }
+
+    // Only process successful payment
+    if (
+        $payload['event_type'] !== 'ORDER_PROCESSED' ||
+        $payload['data']['status'] !== 'PROCESSED'
+    ) {
+        echo json_encode(['message' => 'Event ignored']);
+        return;
+    }
+
+    $pineOrderId = $payload['data']['order_id'];
+
+    // Map PinePG order → OpenCart order
+    $opencartOrderId = $this->model_extension_payment_pinepg
+        ->getOpenCartOrderId($pineOrderId);
+
+    if (!$opencartOrderId) {
+        $this->logger->write("Webhook error: Order not found for Pine order $pineOrderId");
+        http_response_code(404);
+        echo json_encode(['error' => 'Order not found']);
+        return;
+    }
+
+    $order_info = $this->model_checkout_order->getOrder($opencartOrderId);
+
+    // 🛑 Idempotency (already paid)
+    if ((int)$order_info['order_status_id'] === 2) {
+        $this->logger->write("Order $opencartOrderId already processed (status 2)");
+        echo json_encode(['message' => 'Order already processed']);
+        return;
+    }
+
+    // ✅ Mark order as PAID
+    $comment = 'Payment confirmed via PinePG webhook. Pine Order ID: ' . $pineOrderId;
+
+    $this->model_checkout_order->addOrderHistory(
+        $opencartOrderId,
+        2, // Processing
+        $comment,
+        true
+    );
+
+    $this->logger->write("Webhook success for order $opencartOrderId");
+
+    echo json_encode(['message' => 'Webhook processed successfully']);
+}
+
+private function verifyWebhookSignature(array $headers, string $rawBody): bool
+{
+    $webhookId  = $headers['webhook-id'] ?? '';
+    $timestamp  = $headers['webhook-timestamp'] ?? '';
+    $signature  = $headers['webhook-signature'] ?? '';
+
+    $this->logger->write("Signature check - ID: $webhookId, Timestamp: $timestamp, Sig: $signature");
+
+    if (!$webhookId || !$timestamp || !$signature) {
+        $this->logger->write("Missing webhook headers");
+        return false;
+    }
+
+    // ⏱ Replay protection (5 minutes)
+    $timeDiff = abs(time() - (int)$timestamp);
+    if ($timeDiff > 300) {
+        $this->logger->write("Timestamp expired. Diff: $timeDiff seconds");
+        return false;
+    }
+
+    // Secret from OpenCart admin config - Use the SAME secret as in order creation
+    $secret = $this->config->get('payment_pinepg_secure_secret');
+    
+    if (!$secret) {
+        $this->logger->write("No webhook secret configured");
+        return false;
+    }
+
+    $this->logger->write("Secret length: " . strlen($secret));
+    
+    // 🔑 IMPORTANT: The secret needs to be base64 encoded first (as per PinePG docs)
+    $base64Secret = base64_encode($secret);
+    $this->logger->write("Base64 encoded secret: $base64Secret");
+    
+    // Then decode it to get the actual bytes
+    $secretBytes = base64_decode($base64Secret);
+    
+    if ($secretBytes === false) {
+        $this->logger->write("Failed to base64 decode the secret");
+        return false;
+    }
+
+    // PinePG signing format: webhook-id.timestamp.body
+    $signedPayload = $webhookId . '.' . $timestamp . '.' . $rawBody;
+    $this->logger->write("Signed payload length: " . strlen($signedPayload));
+    $this->logger->write("Raw body length: " . strlen($rawBody));
+
+    // Generate expected signature
+    $expectedSignature = base64_encode(
+        hash_hmac('sha256', $signedPayload, $secretBytes, true)
+    );
+
+    // Header format: v1,XXXX
+    $receivedSignature = str_replace('v1,', '', $signature);
+
+    $this->logger->write("Expected signature: $expectedSignature");
+    $this->logger->write("Received signature: $receivedSignature");
+
+    // Use hash_equals for timing attack protection
+    $result = hash_equals($expectedSignature, $receivedSignature);
+    
+    if (!$result) {
+        $this->logger->write("Signature mismatch!");
+    }
+    
+    return $result;
+}
+
+private function getWebhookHeaders(): array
+{
+    $headers = [];
+    
+    // First try to get headers using getallheaders() if available
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if ($headers) {
+            // Convert all keys to lowercase for consistency
+            $headers = array_change_key_case($headers, CASE_LOWER);
+            return $headers;
+        }
+    }
+    
+    // Fallback: extract headers from $_SERVER
+    foreach ($_SERVER as $key => $value) {
+        // Handle standard HTTP_ headers
+        if (strpos($key, 'HTTP_') === 0) {
+            $headerName = str_replace('_', '-', substr($key, 5));
+            $headers[strtolower($headerName)] = $value;
+        }
+        // Handle CONTENT_ headers (like CONTENT_TYPE, CONTENT_LENGTH)
+        elseif (strpos($key, 'CONTENT_') === 0) {
+            $headerName = str_replace('_', '-', $key);
+            $headers[strtolower($headerName)] = $value;
+        }
+    }
+    
+    return $headers;
+}
+
 		
 }
 ?>

@@ -76,4 +76,10 @@ For any help or troubleshooting, please reach out to our:
 
 ---
 
+🔔 Webhook Configuration
+Webhook URL
+
+https://merchanturl.com/index.php?route=extension/payment/pinepg/webhook
+
+
 © 2025 Pine Labs. All rights reserved.
