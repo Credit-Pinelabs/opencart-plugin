@@ -12,22 +12,24 @@ class Controllerextensionpaymentpinepg extends Controller {
     $order_info = $this->model_checkout_order->getOrder($this->session->data['order_id']);
 
 
-	// Fetch product details
-    $products = $this->cart->getProducts();
+	// Use order products — prices already stored in order currency, no conversion needed
+    $order_products = $this->model_checkout_order->getOrderProducts($Order_Id);
     $product_details = [];
 
-    foreach ($products as $product) {
+    foreach ($order_products as $product) {
         $product_info = $this->model_catalog_product->getProduct($product['product_id']);
         $product_details[] = [
             'product_id'    => $product['product_id'],
             'name'          => $product['name'],
             'quantity'      => $product['quantity'],
-            'price'         => $this->currency->format($product['price'], $order_info['currency_code'], $order_info['currency_value'], false),
-            'total'         => $this->currency->format($product['total'], $order_info['currency_code'], $order_info['currency_value'], false),
-            'model'         => $product_info['model'] ?? '',
+            'price'         => floatval($product['price']),
+            'total'         => floatval($product['total']),
+            'tax'           => floatval($product['tax']),
+            'model'         => $product['model'] ?? '',
             'sku'           => $product_info['sku'] ?? '',
         ];
     }
+
 
     $order_info['products'] = $product_details;
 	// Fetch product details
@@ -109,7 +111,7 @@ if ($coupon_discount > 0) {
     $PinePgMode = $this->config->get('payment_pinepg_mode');
     $url = ($PinePgMode === "live")
         ? 'https://api.pluralpay.in/api/checkout/v1/orders'
-        : 'https://pluraluat.v2.pinepg.in/api/checkout/v1/orders';
+        : 'https://ipg-apacuat.creditpluspinelabs.com/api/checkout/v1/orders';
 
     $access_token = $this->getAccessToken();
     if (!$access_token) {
@@ -306,7 +308,7 @@ private function getAccessToken() {
 	{
 		$url ='https://api.pluralpay.in/api/auth/v1/token';
 	}else{
-		$url ='https://pluraluat.v2.pinepg.in/api/auth/v1/token';
+		$url ='https://ipg-apacuat.creditpluspinelabs.com/api/auth/v1/token';
 	}
 
     $access_code= $this->config->get('payment_pinepg_access_code');
@@ -402,7 +404,7 @@ public function process_refund($order_info) {
 	{
 		$url ='https://api.pluralpay.in/api/pay/v1/refunds/' . $refund_order_id;
 	}else{
-		$url ='https://pluraluat.v2.pinepg.in/api/pay/v1/refunds/' . $refund_order_id;
+		$url ='https://ipg-apacuat.creditpluspinelabs.com/api/pay/v1/refunds/' . $refund_order_id;
 	}
 
 
@@ -531,7 +533,7 @@ private function callEnquiryApi($pinepg_order_id)
     $PinePgMode = $this->config->get('payment_pinepg_mode');
     $url = ($PinePgMode == "live") 
         ? 'https://api.pluralpay.in/api/pay/v1/orders/' . $pinepg_order_id
-        : 'https://pluraluat.v2.pinepg.in/api/pay/v1/orders/' . $pinepg_order_id;
+        : 'https://ipg-apacuat.creditpluspinelabs.com/api/pay/v1/orders/' . $pinepg_order_id;
 
     $access_token = $this->getAccessToken();
     if (!$access_token) {
