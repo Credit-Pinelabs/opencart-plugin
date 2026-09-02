@@ -79,7 +79,7 @@ class ControllerExtensionPaymentPinepgCron extends Controller {
         $PinePgMode = $this->config->get('payment_pinepg_mode');
         $url = ($PinePgMode == "live") 
             ? 'https://api.pluralpay.in/api/pay/v1/orders/' . $pinepg_order_id
-            : 'https://pluraluat.v2.pinepg.in/api/pay/v1/orders/' . $pinepg_order_id;
+            : 'https://ipg-apacuat.creditpluspinelabs.com/api/pay/v1/orders/' . $pinepg_order_id;
 
         $access_token = $this->getAccessToken();
         if (!$access_token) {
@@ -121,7 +121,7 @@ class ControllerExtensionPaymentPinepgCron extends Controller {
         $PinePgMode = $this->config->get('payment_pinepg_mode');
         $url = ($PinePgMode == "live") 
             ? 'https://api.pluralpay.in/api/auth/v1/token'
-            : 'https://pluraluat.v2.pinepg.in/api/auth/v1/token';
+            : 'https://ipg-apacuat.creditpluspinelabs.com/api/auth/v1/token';
 
         $body = json_encode([
             'client_id' => $this->config->get('payment_pinepg_access_code'),
